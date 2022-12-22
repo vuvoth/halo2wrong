@@ -390,7 +390,7 @@ mod tests {
                 },
             )?;
 
-            layouter.assign_region(
+            let hash_result = layouter.assign_region(
                 || "region 1",
                 |region| {
                     let offset = 0;
@@ -400,12 +400,12 @@ mod tests {
                         HasherChip::<F, 0, 0, 3, 2>::new(&mut ctx, &spec, &main_gate_config)?;
                     hasher_chip.update(&input);
                     let ans = hasher_chip.hash(&mut ctx)?;
-                    println!("{:?}", ans.value()); 
-                    Ok(())
+                    Ok(ans)
                 },
             )?;
 
-            Ok(())
+            main_gate.expose_public(layouter, hash_result, 0)
+
         }
     }
 
@@ -417,12 +417,10 @@ mod tests {
         let circuit = TestCircuit::<Fr> {
             input: vec![Value::known(a), Value::known(b), Value::known(c)]
         };
-        assert_eq!(mock_prover_verify(&circuit, vec![vec![]]), Ok(()));
-
         let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
         hasher.update(&[a, b, c]);
         let ans = hasher.squeeze();
+        assert_eq!(mock_prover_verify(&circuit, vec![vec![ans]]), Ok(()));
 
-        println!("{:#?}", ans);
     }
 }
