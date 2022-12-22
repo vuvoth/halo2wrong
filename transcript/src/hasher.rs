@@ -332,6 +332,7 @@ mod tests {
         },
         maingate::{MainGate, MainGateConfig, MainGateInstructions, RegionCtx, mock_prover_verify},
     };
+    use group::ff::PrimeField;
     use poseidon::{Spec, Poseidon};
 
     #[derive(Clone)]
@@ -411,16 +412,18 @@ mod tests {
 
     #[test]
     fn test_hash_chip() {
-        let a = Fr::from(0);
-        let b = Fr::from(1);
-        let c = Fr::from(2);
+        let a = Fr::from(3);
+        let b = Fr::from(4);
+        let ext = Fr::from_str_vartime("14763215145315200506921711489642608356394854266165572616578112107564877678998");
+
         let circuit = TestCircuit::<Fr> {
-            input: vec![Value::known(a), Value::known(b), Value::known(c)]
+            input: vec![Value::known(a), Value::known(b)]
         };
         let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
-        hasher.update(&[a, b, c]);
+        hasher.update(&[a, b]);
         let ans = hasher.squeeze();
         assert_eq!(mock_prover_verify(&circuit, vec![vec![ans]]), Ok(()));
-
+        println!("{:?}", ans);
+        assert_eq!(ans, ext.unwrap());
     }
 }
