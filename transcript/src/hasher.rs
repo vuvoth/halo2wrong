@@ -259,7 +259,7 @@ impl<
     }
 
     /// Constrains poseidon permutation while mutating the given state
-    pub(crate) fn permutation(
+    pub fn permutation(
         &mut self,
         ctx: &mut RegionCtx<'_, F>,
         inputs: Vec<AssignedValue<F>>,
@@ -298,7 +298,7 @@ impl<
         Ok(())
     }
 
-    pub(crate) fn hash(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
+    pub fn hash(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
         // Get elements to be hashed
         let input_elements = self.absorbing.clone();
         // Flush the input que
@@ -317,5 +317,112 @@ impl<
         }
 
         Ok(self.state.0[1].clone())
+    }
+}
+
+mod tests {
+    use std::marker::PhantomData;
+
+    use super::HasherChip;
+    use ecc::{
+        halo2::{
+            circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
+            halo2curves::{FieldExt, bn256::Fr},
+            plonk::{Circuit, ConstraintSystem},
+        },
+        maingate::{MainGate, MainGateConfig, MainGateInstructions, RegionCtx, mock_prover_verify},
+    };
+    use poseidon::{Spec, Poseidon};
+
+    #[derive(Clone)]
+    struct TestCircuitConfig<F: FieldExt> {
+        main_gate_config: MainGateConfig,
+        _maker: PhantomData<F>,
+    }
+
+    impl<F: FieldExt> TestCircuitConfig<F> {
+        pub fn new(meta: &mut ConstraintSystem<F>) -> Self {
+            let main_gate_config = MainGate::<F>::configure(meta);
+            TestCircuitConfig {
+                main_gate_config,
+                _maker: PhantomData,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct TestCircuit<F: FieldExt> {
+        pub input: Vec<Value<F>>,
+    }
+
+    impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
+        type Config = TestCircuitConfig<F>;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            let config = TestCircuitConfig::new(meta);
+            config
+        }
+
+        fn without_witnesses(&self) -> Self {
+            Self::default()
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl ecc::halo2::circuit::Layouter<F>,
+        ) -> Result<(), ecc::halo2::plonk::Error> {
+            let main_gate_config = config.main_gate_config;
+            let main_gate = MainGate::<F>::new(main_gate_config.clone());
+
+            let input = layouter.assign_region(
+                || "input",
+                |region| {
+                    let offset = 0;
+                    let mut ctx = RegionCtx::new(region, offset);
+                    let mut inps: Vec<AssignedCell<F, F>> = Vec::new();
+
+                    for inp in self.input.clone() {
+                        inps.push(main_gate.assign_value(&mut ctx, inp)?);
+                    }
+                    Ok(inps)
+                },
+            )?;
+
+            layouter.assign_region(
+                || "region 1",
+                |region| {
+                    let offset = 0;
+                    let mut ctx = RegionCtx::new(region, offset);
+                    let spec = Spec::<F, 3, 2>::new(8, 57);
+                    let mut hasher_chip =
+                        HasherChip::<F, 0, 0, 3, 2>::new(&mut ctx, &spec, &main_gate_config)?;
+                    hasher_chip.update(&input);
+                    let ans = hasher_chip.hash(&mut ctx)?;
+                    println!("{:?}", ans.value()); 
+                    Ok(())
+                },
+            )?;
+
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_hash_chip() {
+        let a = Fr::from(0);
+        let b = Fr::from(1);
+        let c = Fr::from(2);
+        let circuit = TestCircuit::<Fr> {
+            input: vec![Value::known(a), Value::known(b), Value::known(c)]
+        };
+        assert_eq!(mock_prover_verify(&circuit, vec![vec![]]), Ok(()));
+
+        let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
+        hasher.update(&[a, b, c]);
+        let ans = hasher.squeeze();
+
+        println!("{:#?}", ans);
     }
 }
